@@ -1,0 +1,11 @@
+{
+  "domain": "optimal_llm_haos",
+  "name": "Optimal LLM HAOS",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://github.com/optimal_llm_haos",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/optimal_llm_haos/issues",
+  "version": "0.1.0"
+}

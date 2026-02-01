@@ -1,0 +1,61 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to Ollama",
+                "description": "Enter the URL of your Ollama server. The server must be accessible from Home Assistant.",
+                "data": {
+                    "ollama_url": "Ollama URL"
+                },
+                "data_description": {
+                    "ollama_url": "URL of your Ollama server (e.g., http://localhost:11434)"
+                }
+            },
+            "model": {
+                "title": "Configure Model",
+                "description": "Select the model to use and configure caching options.",
+                "data": {
+                    "model": "Model",
+                    "aggressive_caching": "Persist cache to disk",
+                    "llm_hass_api": "Home Assistant API"
+                },
+                "data_description": {
+                    "model": "The Ollama model to use for conversations",
+                    "aggressive_caching": "Save context cache to disk for faster startup after restarts",
+                    "llm_hass_api": "Which Home Assistant API to expose to the LLM"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Cannot connect to Ollama server. Please verify the URL and ensure the server is running.",
+            "no_models": "No models found on Ollama server. Please pull a model first (e.g., ollama pull llama3.2).",
+            "unknown": "An unexpected error occurred."
+        },
+        "abort": {
+            "already_configured": "This Ollama server and model combination is already configured."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Configure Optimal LLM HAOS",
+                "description": "Update the configuration for your Ollama conversation agent.",
+                "data": {
+                    "model": "Model",
+                    "aggressive_caching": "Persist cache to disk"
+                },
+                "data_description": {
+                    "model": "The Ollama model to use for conversations",
+                    "aggressive_caching": "Save context cache to disk for faster startup after restarts"
+                }
+            }
+        }
+    },
+    "entity": {
+        "conversation": {
+            "ollama_conversation": {
+                "name": "Ollama Conversation"
+            }
+        }
+    }
+}
