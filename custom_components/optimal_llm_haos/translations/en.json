@@ -1,4 +1,20 @@
 {
+    "services": {
+        "preview_prompts": {
+            "name": "Preview Prompts",
+            "description": "Preview the fully rendered prompts with all variables filled in from Home Assistant.",
+            "fields": {
+                "config_entry_id": {
+                    "name": "Configuration Entry",
+                    "description": "The config entry to preview prompts for (uses first entry if not specified)"
+                },
+                "include_context": {
+                    "name": "Include Context Prompt",
+                    "description": "Whether to also render the dynamic context prompt with sample entity states"
+                }
+            }
+        }
+    },
     "config": {
         "step": {
             "user": {
@@ -39,7 +55,15 @@
         "step": {
             "init": {
                 "title": "Configure Optimal LLM HAOS",
-                "description": "Update the configuration for your Ollama conversation agent.",
+                "description": "Choose what you want to configure.",
+                "menu_options": {
+                    "model_settings": "Model & Caching Settings",
+                    "prompt_settings": "Prompt Templates"
+                }
+            },
+            "model_settings": {
+                "title": "Model & Caching Settings",
+                "description": "Configure the Ollama model and caching behavior.",
                 "data": {
                     "model": "Model",
                     "aggressive_caching": "Persist cache to disk"
@@ -47,6 +71,18 @@
                 "data_description": {
                     "model": "The Ollama model to use for conversations",
                     "aggressive_caching": "Save context cache to disk for faster startup after restarts"
+                }
+            },
+            "prompt_settings": {
+                "title": "Prompt Templates",
+                "description": "Customize the system prompt and context prompt templates. Leave unchanged or clear to use defaults.\n\n**System Prompt (Cached)**: Permanently cached for faster responses. Use for static information like personality, capabilities, and device descriptions. Use `{device_summary_placeholder}` as placeholder for the auto-generated device list.\n\n**Context Prompt (Dynamic)**: Re-embedded on every conversation turn. Use for volatile information like current entity states. Use `{entity_states_placeholder}` as placeholder for current states.\n\n**Tip**: To see the full rendered prompts, go to Developer Tools > Actions and call `optimal_llm_haos.preview_prompts`.",
+                "data": {
+                    "system_prompt": "System Prompt Template (Cached)",
+                    "context_prompt": "Context Prompt Template (Dynamic)"
+                },
+                "data_description": {
+                    "system_prompt": "Cached permanently for speed. Include {device_summary_placeholder} where you want the device list inserted. Best for static information.",
+                    "context_prompt": "Re-embedded on every call. Include {entity_states_placeholder} for current entity states. Best for dynamic information."
                 }
             }
         }

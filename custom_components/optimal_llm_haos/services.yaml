@@ -1,0 +1,21 @@
+preview_prompts:
+  name: Preview Prompts
+  description: >-
+    Preview the fully rendered prompts with all variables filled in.
+    This action helps you understand how your prompt templates will look with actual
+    device and entity data from Home Assistant.
+  fields:
+    config_entry_id:
+      name: Configuration Entry
+      description: The config entry to preview prompts for (optional, uses first entry if not specified)
+      required: false
+      selector:
+        config_entry:
+          integration: optimal_llm_haos
+    include_context:
+      name: Include Context Prompt
+      description: Whether to also render the dynamic context prompt with sample entity states
+      required: false
+      default: true
+      selector:
+        boolean:

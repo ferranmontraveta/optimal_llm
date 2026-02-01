@@ -14,51 +14,50 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import LOGGER
-
-# System prompt template for the base prompt
-SYSTEM_PROMPT_TEMPLATE = """You are a helpful smart home assistant for Home Assistant.
-You can help users control their smart home devices and answer questions about their home.
-
-## Available Devices and Areas
-
-{device_summary}
-
-## Available Services
-
-You can control devices by calling Home Assistant services. Common services include:
-- light.turn_on / light.turn_off - Control lights
-- switch.turn_on / switch.turn_off - Control switches
-- climate.set_temperature - Set thermostat temperature
-- cover.open_cover / cover.close_cover - Control blinds/covers
-- media_player.play_media / media_player.pause - Control media players
-- scene.turn_on - Activate scenes
-- script.turn_on - Run scripts
-
-When the user asks to control a device, identify the appropriate entity and service.
-
-## Guidelines
-
-1. Be concise and helpful
-2. If you're not sure which device the user means, ask for clarification
-3. Confirm actions before executing them when appropriate
-4. If a device is unavailable or in an error state, inform the user
-5. Provide current state information when relevant
-"""
+from .const import DEFAULT_CONTEXT_PROMPT, DEFAULT_SYSTEM_PROMPT, LOGGER
 
 
 class PromptBuilder:
     """Builds prompts for Ollama from Home Assistant registries."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        system_prompt_template: str | None = None,
+        context_prompt_template: str | None = None,
+    ) -> None:
         """
         Initialize the prompt builder.
 
         Args:
             hass: Home Assistant instance
+            system_prompt_template: Custom system prompt (uses default if None)
+            context_prompt_template: Custom context prompt (uses default if None)
 
         """
         self._hass = hass
+        self._system_prompt_template = system_prompt_template or DEFAULT_SYSTEM_PROMPT
+        self._context_prompt_template = context_prompt_template or DEFAULT_CONTEXT_PROMPT
+
+    @property
+    def system_prompt_template(self) -> str:
+        """Return the current system prompt template."""
+        return self._system_prompt_template
+
+    @system_prompt_template.setter
+    def system_prompt_template(self, value: str) -> None:
+        """Set the system prompt template."""
+        self._system_prompt_template = value or DEFAULT_SYSTEM_PROMPT
+
+    @property
+    def context_prompt_template(self) -> str:
+        """Return the current context prompt template."""
+        return self._context_prompt_template
+
+    @context_prompt_template.setter
+    def context_prompt_template(self, value: str) -> None:
+        """Set the context prompt template."""
+        self._context_prompt_template = value or DEFAULT_CONTEXT_PROMPT
 
     async def async_build_base_prompt(self) -> str:
         """
@@ -72,7 +71,13 @@ class PromptBuilder:
 
         """
         device_summary = await self._async_build_device_summary()
-        return SYSTEM_PROMPT_TEMPLATE.format(device_summary=device_summary)
+
+        # Try to format with device_summary placeholder
+        try:
+            return self._system_prompt_template.format(device_summary=device_summary)
+        except KeyError:
+            # If template doesn't have {device_summary}, append it
+            return f"{self._system_prompt_template}\n\n## Devices\n{device_summary}"
 
     async def _async_build_device_summary(self) -> str:
         """
@@ -140,6 +145,7 @@ class PromptBuilder:
 
         # Format the summary
         lines = []
+        max_entities_per_device = 5
 
         for area_name in sorted(areas_devices.keys()):
             devices = areas_devices[area_name]
@@ -151,10 +157,11 @@ class PromptBuilder:
 
                 if entities:
                     entity_list = ", ".join(
-                        f"{e['entity_id']}" for e in entities[:5]
+                        f"{e['entity_id']}" for e in entities[:max_entities_per_device]
                     )
-                    if len(entities) > 5:
-                        entity_list += f" (+{len(entities) - 5} more)"
+                    if len(entities) > max_entities_per_device:
+                        extra = len(entities) - max_entities_per_device
+                        entity_list += f" (+{extra} more)"
                     lines.append(f"- {device_name}: {entity_list}")
                 else:
                     lines.append(f"- {device_name}")
@@ -166,7 +173,7 @@ class PromptBuilder:
                 entities = device["entities"]
                 if entities:
                     entity_list = ", ".join(
-                        f"{e['entity_id']}" for e in entities[:5]
+                        f"{e['entity_id']}" for e in entities[:max_entities_per_device]
                     )
                     lines.append(f"- {device_name}: {entity_list}")
                 else:
@@ -199,16 +206,14 @@ class PromptBuilder:
         if not exposed_entities:
             return ""
 
-        lines = ["Current state of relevant entities:"]
+        lines = []
 
         for entity in exposed_entities:
             entity_id = entity.get("entity_id", "unknown")
             state = self._hass.states.get(entity_id)
 
             if state:
-                friendly_name = state.attributes.get(
-                    "friendly_name", entity_id
-                )
+                friendly_name = state.attributes.get("friendly_name", entity_id)
                 state_str = state.state
 
                 # Add relevant attributes
@@ -228,7 +233,14 @@ class PromptBuilder:
                 attr_str = f" ({', '.join(attrs)})" if attrs else ""
                 lines.append(f"- {friendly_name} ({entity_id}): {state_str}{attr_str}")
 
-        return "\n".join(lines)
+        entity_states = "\n".join(lines) if lines else "No entity states available."
+
+        # Format with the context template
+        try:
+            return self._context_prompt_template.format(entity_states=entity_states)
+        except KeyError:
+            # If template doesn't have {entity_states}, prepend it
+            return f"{entity_states}\n\n{self._context_prompt_template}"
 
     def build_tools_prompt(self, tools: list[dict[str, Any]]) -> str:
         """

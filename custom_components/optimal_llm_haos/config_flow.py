@@ -12,10 +12,14 @@ from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import (
     CONF_AGGRESSIVE_CACHING,
+    CONF_CONTEXT_PROMPT,
     CONF_MODEL,
     CONF_OLLAMA_URL,
+    CONF_SYSTEM_PROMPT,
+    DEFAULT_CONTEXT_PROMPT,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
+    DEFAULT_SYSTEM_PROMPT,
     DOMAIN,
     LOGGER,
 )
@@ -183,14 +187,26 @@ class OllamaOptionsFlowHandler(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Handle options flow."""
+        """Handle options flow - main menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["model_settings", "prompt_settings"],
+        )
+
+    async def async_step_model_settings(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Handle model and caching settings."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Update the config entry options
-            return self.async_create_entry(title="", data=user_input)
+            # Merge with existing options
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
 
-        # Get current values
+        # Get current values from options, falling back to data
+        current_options = self._config_entry.options
         current_data = self._config_entry.data
 
         # Fetch available models for dropdown
@@ -204,20 +220,31 @@ class OllamaOptionsFlowHandler(config_entries.OptionsFlow):
         except OllamaClientError as exc:
             LOGGER.warning("Could not fetch models: %s", exc)
             # Use current model as fallback
-            available_models = [current_data.get(CONF_MODEL, DEFAULT_MODEL)]
+            current_model = current_options.get(
+                CONF_MODEL, current_data.get(CONF_MODEL, DEFAULT_MODEL)
+            )
+            available_models = [current_model]
 
         model_options = [
             selector.SelectOptionDict(value=model, label=model)
             for model in available_models
         ]
 
+        current_model = current_options.get(
+            CONF_MODEL, current_data.get(CONF_MODEL, DEFAULT_MODEL)
+        )
+        current_caching = current_options.get(
+            CONF_AGGRESSIVE_CACHING,
+            current_data.get(CONF_AGGRESSIVE_CACHING, True),
+        )
+
         return self.async_show_form(
-            step_id="init",
+            step_id="model_settings",
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         CONF_MODEL,
-                        default=current_data.get(CONF_MODEL, DEFAULT_MODEL),
+                        default=current_model,
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=model_options,
@@ -226,9 +253,76 @@ class OllamaOptionsFlowHandler(config_entries.OptionsFlow):
                     ),
                     vol.Required(
                         CONF_AGGRESSIVE_CACHING,
-                        default=current_data.get(CONF_AGGRESSIVE_CACHING, True),
+                        default=current_caching,
                     ): selector.BooleanSelector(),
                 },
             ),
             errors=errors,
+        )
+
+    async def async_step_prompt_settings(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Handle prompt template settings."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # Handle reset to defaults
+            system_prompt = user_input.get(CONF_SYSTEM_PROMPT, "").strip()
+            context_prompt = user_input.get(CONF_CONTEXT_PROMPT, "").strip()
+
+            # If empty, don't store (will use defaults)
+            new_options = {**self._config_entry.options}
+
+            if system_prompt and system_prompt != DEFAULT_SYSTEM_PROMPT:
+                new_options[CONF_SYSTEM_PROMPT] = system_prompt
+            elif CONF_SYSTEM_PROMPT in new_options:
+                del new_options[CONF_SYSTEM_PROMPT]
+
+            if context_prompt and context_prompt != DEFAULT_CONTEXT_PROMPT:
+                new_options[CONF_CONTEXT_PROMPT] = context_prompt
+            elif CONF_CONTEXT_PROMPT in new_options:
+                del new_options[CONF_CONTEXT_PROMPT]
+
+            return self.async_create_entry(title="", data=new_options)
+
+        # Get current prompts from options
+        current_options = self._config_entry.options
+        current_system_prompt = current_options.get(
+            CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT
+        )
+        current_context_prompt = current_options.get(
+            CONF_CONTEXT_PROMPT, DEFAULT_CONTEXT_PROMPT
+        )
+
+        return self.async_show_form(
+            step_id="prompt_settings",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_SYSTEM_PROMPT,
+                        default=current_system_prompt,
+                    ): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.TEXT,
+                            multiline=True,
+                        ),
+                    ),
+                    vol.Optional(
+                        CONF_CONTEXT_PROMPT,
+                        default=current_context_prompt,
+                    ): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.TEXT,
+                            multiline=True,
+                        ),
+                    ),
+                },
+            ),
+            errors=errors,
+            description_placeholders={
+                "device_summary_placeholder": "{device_summary}",
+                "entity_states_placeholder": "{entity_states}",
+            },
         )

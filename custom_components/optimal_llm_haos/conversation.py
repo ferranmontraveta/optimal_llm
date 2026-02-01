@@ -1,29 +1,24 @@
-"""
-Conversation entity for optimal_llm_haos.
-
-Implements a ConversationEntity that uses Ollama for natural language
-processing with persistent KV caching for efficient operation.
-"""
+"""Conversation entity for optimal_llm_haos."""
 
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from homeassistant.components.conversation import (
     ConversationEntity,
     ConversationInput,
     ConversationResult,
 )
-from homeassistant.components.conversation.chat_log import ChatLog
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LOGGER
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
     from .cache_coordinator import OllamaCacheCoordinator
     from .data import OllamaConfigEntryData
     from .ollama_client import OllamaClient
@@ -31,19 +26,11 @@ if TYPE_CHECKING:
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    hass: HomeAssistant,  # noqa: ARG001
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """
-    Set up the conversation entity from a config entry.
-
-    Args:
-        hass: Home Assistant instance
-        config_entry: The config entry
-        async_add_entities: Callback to add entities
-
-    """
+    """Set up the conversation entity from a config entry."""
     data: OllamaConfigEntryData = config_entry.runtime_data
     async_add_entities([
         OllamaConversationEntity(
@@ -68,16 +55,7 @@ class OllamaConversationEntity(ConversationEntity):
         coordinator: OllamaCacheCoordinator,
         prompt_builder: PromptBuilder,
     ) -> None:
-        """
-        Initialize the conversation entity.
-
-        Args:
-            config_entry: The config entry
-            client: Ollama API client
-            coordinator: Cache coordinator
-            prompt_builder: Prompt builder
-
-        """
+        """Initialize the conversation entity."""
         self._config_entry = config_entry
         self._client = client
         self._coordinator = coordinator
@@ -94,15 +72,11 @@ class OllamaConversationEntity(ConversationEntity):
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
-        """
-        Return supported languages.
-
-        Returns '*' to indicate all languages are supported.
-        """
+        """Return supported languages."""
         return "*"
 
     async def async_added_to_hass(self) -> None:
-        """Called when entity is added to hass."""
+        """Handle entity added to hass."""
         await super().async_added_to_hass()
 
         # Ensure cache is warmed when entity is added
@@ -113,41 +87,27 @@ class OllamaConversationEntity(ConversationEntity):
                 if not loaded:
                     # No disk cache, warm fresh
                     await self._coordinator.async_warm_cache()
-            except Exception as exc:
-                LOGGER.error("Failed to initialize cache: %s", exc)
+            except Exception:  # noqa: BLE001
+                LOGGER.exception("Failed to initialize cache")
 
-    async def _async_handle_message(
+    async def async_process(
         self,
         user_input: ConversationInput,
-        chat_log: ChatLog,
     ) -> ConversationResult:
-        """
-        Handle an incoming conversation message.
-
-        Args:
-            user_input: The user's input containing text and context
-            chat_log: Chat log for conversation history and LLM API access
-
-        Returns:
-            ConversationResult with the assistant's response
-
-        """
+        """Process a conversation input and return a result."""
         conversation_id = user_input.conversation_id or str(uuid.uuid4())
 
         try:
-            # Get exposed entities from the LLM API if available
-            exposed_entities = await self._get_exposed_entities(chat_log)
-
             # Build volatile context with current entity states
             volatile_context = self._prompt_builder.build_volatile_context(
-                exposed_entities
+                exposed_entities=None  # Will be enhanced later with exposed entities
             )
 
             # Build complete message array
             messages = self._coordinator.build_chat_messages(
                 conversation_id=conversation_id,
                 user_message=user_input.text,
-                volatile_context=volatile_context,
+                volatile_context=volatile_context if volatile_context else None,
             )
 
             # Send to Ollama with cache recovery
@@ -185,14 +145,14 @@ class OllamaConversationEntity(ConversationEntity):
                 response=intent_response,
             )
 
-        except Exception as exc:
-            LOGGER.error("Error processing conversation: %s", exc)
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Error processing conversation")
 
             # Return error response
             intent_response = intent.IntentResponse(language=user_input.language)
             intent_response.async_set_error(
                 intent.IntentResponseErrorCode.UNKNOWN,
-                f"Error communicating with Ollama: {exc}",
+                "Error communicating with Ollama. Please check the logs.",
             )
 
             return ConversationResult(
@@ -200,51 +160,9 @@ class OllamaConversationEntity(ConversationEntity):
                 response=intent_response,
             )
 
-    async def _get_exposed_entities(
-        self,
-        chat_log: ChatLog,
-    ) -> list[dict[str, Any]]:
-        """
-        Get list of exposed entities from the LLM API.
-
-        Args:
-            chat_log: Chat log with LLM API access
-
-        Returns:
-            List of exposed entity dictionaries
-
-        """
-        exposed_entities = []
-
-        # Try to get entities from the LLM API
-        try:
-            if hasattr(chat_log, "llm_api") and chat_log.llm_api:
-                # Get tools which represent exposed entities/services
-                tools = getattr(chat_log.llm_api, "tools", [])
-
-                for tool in tools:
-                    # Extract entity info from tool if available
-                    if hasattr(tool, "entity_id"):
-                        exposed_entities.append({
-                            "entity_id": tool.entity_id,
-                        })
-
-        except Exception as exc:
-            LOGGER.debug("Could not get exposed entities from LLM API: %s", exc)
-
-        return exposed_entities
-
     async def async_prepare(self, language: str | None = None) -> None:
-        """
-        Prepare the conversation entity for use.
-
-        This is called before processing requests and can be used
-        to load models or other resources.
-
-        Args:
-            language: The language to prepare for (optional)
-
-        """
+        """Prepare the conversation entity for use."""
+        _ = language  # Unused but required by interface
         # Ensure cache is valid
         if not self._coordinator.is_cache_valid:
             LOGGER.info("Cache not valid, warming...")
