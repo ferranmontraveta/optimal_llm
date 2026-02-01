@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+import ollama
+
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 
@@ -22,7 +24,6 @@ from .const import (
 )
 
 if TYPE_CHECKING:
-    from .ollama_client import OllamaClient
     from .prompt_builder import PromptBuilder
 
 
@@ -32,7 +33,7 @@ class OllamaCacheCoordinator:
     def __init__(
         self,
         hass: HomeAssistant,
-        client: OllamaClient,
+        ollama_url: str,
         prompt_builder: PromptBuilder,
         model: str,
         aggressive_caching: bool = True,
@@ -42,14 +43,15 @@ class OllamaCacheCoordinator:
 
         Args:
             hass: Home Assistant instance
-            client: Ollama API client
+            ollama_url: URL of the Ollama server
             prompt_builder: Prompt builder for constructing prompts
             model: Name of the Ollama model to use
             aggressive_caching: If True, persist cache to disk
 
         """
         self._hass = hass
-        self._client = client
+        self._ollama_url = ollama_url
+        self._ollama_client = ollama.AsyncClient(host=ollama_url)
         self._prompt_builder = prompt_builder
         self._model = model
         self._aggressive_caching = aggressive_caching
@@ -156,11 +158,12 @@ class OllamaCacheCoordinator:
 
         # Send a pre-warming request to populate the KV cache
         try:
-            warm_messages = self._base_messages + [
-                {"role": "user", "content": "Hello"},
+            warm_messages = [
+                ollama.Message(role="system", content=system_prompt),
+                ollama.Message(role="user", content="Hello"),
             ]
 
-            await self._client.async_chat(
+            await self._ollama_client.chat(
                 model=self._model,
                 messages=warm_messages,
                 keep_alive="60m",  # Keep model loaded for a while
@@ -174,7 +177,7 @@ class OllamaCacheCoordinator:
             if self._aggressive_caching:
                 await self.async_save_to_disk()
 
-        except Exception as exc:
+        except (ollama.RequestError, ollama.ResponseError) as exc:
             LOGGER.error("Failed to warm cache: %s", exc)
             self._cache_valid = False
             raise

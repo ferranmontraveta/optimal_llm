@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 import voluptuous as vol
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_change
 
 from .cache_coordinator import OllamaCacheCoordinator
@@ -35,7 +34,6 @@ from .const import (
     DOMAIN as DOMAIN,
 )
 from .data import OllamaConfigEntryData
-from .ollama_client import OllamaClient
 from .prompt_builder import PromptBuilder
 
 if TYPE_CHECKING:
@@ -189,12 +187,6 @@ async def async_setup_entry(
     system_prompt = entry.options.get(CONF_SYSTEM_PROMPT)
     context_prompt = entry.options.get(CONF_CONTEXT_PROMPT)
 
-    # Create the Ollama client
-    client = OllamaClient(
-        base_url=ollama_url,
-        session=async_get_clientsession(hass),
-    )
-
     # Create the prompt builder with custom prompts
     prompt_builder = PromptBuilder(
         hass,
@@ -205,7 +197,7 @@ async def async_setup_entry(
     # Create the cache coordinator
     coordinator = OllamaCacheCoordinator(
         hass=hass,
-        client=client,
+        ollama_url=ollama_url,
         prompt_builder=prompt_builder,
         model=model,
         aggressive_caching=aggressive_caching,
@@ -213,7 +205,6 @@ async def async_setup_entry(
 
     # Store runtime data
     entry.runtime_data = OllamaConfigEntryData(
-        client=client,
         coordinator=coordinator,
         prompt_builder=prompt_builder,
         model=model,
