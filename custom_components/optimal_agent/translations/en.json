@@ -1,0 +1,63 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to Ollama",
+                "description": "Enter the URL of your Ollama server. The server must be accessible from Home Assistant.",
+                "data": {
+                    "ollama_url": "Ollama URL"
+                },
+                "data_description": {
+                    "ollama_url": "URL of your Ollama server (e.g., http://localhost:11434)"
+                }
+            },
+            "models": {
+                "title": "Configure Models",
+                "description": "Select the models for routing and conversation.\n\n**Router Model**: Small, fast model for intent classification. Determines if a message is a device command or conversation.\n\n**Chat Model**: Larger model for natural language responses when the router detects conversation.",
+                "data": {
+                    "router_model": "Router Model",
+                    "chat_model": "Chat Model",
+                    "keep_alive_persistent": "Keep Models Loaded Indefinitely"
+                },
+                "data_description": {
+                    "router_model": "Small model for fast intent classification (e.g., gemma3:1b)",
+                    "chat_model": "Model for conversational responses (can be same as router or larger)",
+                    "keep_alive_persistent": "Keep both models loaded in memory indefinitely (uses keep_alive: -1). Recommended for faster response times."
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Cannot connect to Ollama server. Please verify the URL and ensure the server is running.",
+            "no_models": "No models found on Ollama server. Please pull a model first (e.g., ollama pull gemma3:1b).",
+            "unknown": "An unexpected error occurred."
+        },
+        "abort": {
+            "already_configured": "This Ollama server and model combination is already configured."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Configure Optimal Agent",
+                "description": "Update the model configuration for Optimal Agent.",
+                "data": {
+                    "router_model": "Router Model",
+                    "chat_model": "Chat Model",
+                    "keep_alive_persistent": "Keep Models Loaded Indefinitely"
+                },
+                "data_description": {
+                    "router_model": "Small model for fast intent classification",
+                    "chat_model": "Model for conversational responses",
+                    "keep_alive_persistent": "Keep both models loaded in memory indefinitely (faster responses)"
+                }
+            }
+        }
+    },
+    "entity": {
+        "conversation": {
+            "optimal_agent": {
+                "name": "Optimal Agent"
+            }
+        }
+    }
+}

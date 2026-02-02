@@ -1,0 +1,11 @@
+{
+  "domain": "optimal_agent",
+  "name": "Optimal Agent",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/optimal_llm_haos",
+  "iot_class": "local_polling",
+  "requirements": ["ollama>=0.4.0"],
+  "version": "1.0.0"
+}
