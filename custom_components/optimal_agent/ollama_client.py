@@ -26,8 +26,7 @@ class OllamaClient:
         base_url: str,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
-        """
-        Initialize the Ollama client.
+        """Initialize the Ollama client.
 
         Args:
             base_url: Base URL for Ollama server (e.g., http://localhost:11434)
@@ -36,7 +35,14 @@ class OllamaClient:
         """
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        self._client = ollama.AsyncClient(host=base_url)
+        # Lazy initialization to avoid blocking SSL call in event loop
+        self._client: ollama.AsyncClient | None = None
+
+    def _get_client(self) -> ollama.AsyncClient:
+        """Get or create the Ollama client (lazy initialization)."""
+        if self._client is None:
+            self._client = ollama.AsyncClient(host=self._base_url)
+        return self._client
 
     @property
     def base_url(self) -> str:
@@ -56,7 +62,7 @@ class OllamaClient:
         """
         try:
             async with asyncio.timeout(30):
-                response = await self._client.list()
+                response = await self._get_client().list()
                 return response.get("models", [])
         except TimeoutError as exc:
             msg = f"Timeout connecting to Ollama at {self._base_url}"
@@ -157,7 +163,7 @@ class OllamaClient:
         ]
 
         async with asyncio.timeout(self._timeout):
-            await self._client.chat(
+            await self._get_client().chat(
                 model=model,
                 messages=messages,
                 keep_alive=keep_alive,
@@ -195,7 +201,7 @@ class OllamaClient:
 
         try:
             async with asyncio.timeout(self._timeout):
-                return await self._client.chat(
+                return await self._get_client().chat(
                     model=model,
                     messages=messages,
                     keep_alive=keep_alive,
@@ -234,7 +240,7 @@ class OllamaClient:
             options["num_ctx"] = context_limit
 
         try:
-            return await self._client.chat(
+            return await self._get_client().chat(
                 model=model,
                 messages=messages,
                 keep_alive=keep_alive,

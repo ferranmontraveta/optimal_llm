@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.homeassistant.exposed_entities import async_should_expose
 from homeassistant.core import Event, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -139,11 +140,13 @@ class DualModelCacheCoordinator:
         return self._chat_model
 
     async def async_build_device_list(self) -> str:
-        """
-        Build a compact device list for the router model.
+        """Build a compact device list for the router model.
+
+        Only includes entities that are explicitly exposed to the conversation
+        assistant via Home Assistant's Assist settings (Voice Assistants > Expose).
 
         Returns:
-            Formatted string of devices suitable for router context
+            Formatted string of exposed devices suitable for router context
 
         """
         area_registry = ar.async_get(self._hass)
@@ -154,16 +157,19 @@ class DualModelCacheCoordinator:
         areas_entities: dict[str, list[str]] = {}
         unassigned: list[str] = []
 
-        # Priority domains for device control
-        controllable_domains = {
-            "light", "switch", "climate", "cover", "fan",
-            "lock", "scene", "script", "media_player",
-            "alarm_control_panel",
-        }
+        # Track counts for logging
+        total_checked = 0
+        total_exposed = 0
 
         for entity in entity_registry.entities.values():
-            if entity.domain not in controllable_domains:
+            total_checked += 1
+
+            # Only include entities explicitly exposed to conversation assistants
+            # This respects the user's "Expose" settings in Voice Assistants
+            if not async_should_expose(self._hass, "conversation", entity.entity_id):
                 continue
+
+            total_exposed += 1
 
             # Get area name
             area_name = "Unassigned"
@@ -202,13 +208,21 @@ class DualModelCacheCoordinator:
             for entity in sorted(unassigned):
                 lines.append(f"  - {entity}")
 
-        self._device_list = "\n".join(lines) if lines else "No controllable devices found."
+        if lines:
+            self._device_list = "\n".join(lines)
+        else:
+            self._device_list = (
+                "No devices are exposed. Go to Settings > Voice Assistants > Expose "
+                "to select which entities the assistant can control."
+            )
+
         self._device_list_built_at = datetime.now()
 
-        LOGGER.debug(
-            "Built device list: %d areas, %d entities",
+        LOGGER.info(
+            "Built device list: %d exposed entities out of %d total (%d areas)",
+            total_exposed,
+            total_checked,
             len(areas_entities),
-            sum(len(e) for e in areas_entities.values()) + len(unassigned),
         )
 
         return self._device_list

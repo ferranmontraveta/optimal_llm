@@ -134,8 +134,7 @@ class OptimalAgentConversationEntity(
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
-        """
-        Handle a conversation message with dual-model routing.
+        """Handle a conversation message with dual-model routing.
 
         Flow:
         1. Send user message to Router Model for intent classification
@@ -145,10 +144,34 @@ class OptimalAgentConversationEntity(
         3. If NULL response (conversation):
            - Forward to Chat Model for natural language response
         """
-        LOGGER.debug("Processing message: %s", user_input.text[:100])
+        import time
 
-        # Step 1: Route the message
+        request_start = time.monotonic()
+
+        LOGGER.info(
+            "[Request] User message: '%s' (conversation_id=%s)",
+            user_input.text[:80],
+            user_input.conversation_id,
+        )
+
+        # Step 1: Route the message using Router Model
+        LOGGER.info(
+            "[Router] Sending to router model: %s",
+            self._router.model,
+        )
+        route_start = time.monotonic()
         router_result = await self._router.async_route(user_input.text)
+        route_time = (time.monotonic() - route_start) * 1000
+
+        LOGGER.info(
+            "[Router] Decision in %.0fms: %s | action=%s, entity=%s, params=%s",
+            route_time,
+            "TOOL_CALL" if router_result.is_tool_call else "CONVERSATION",
+            router_result.action,
+            router_result.entity,
+            router_result.params,
+        )
+
         trace.async_conversation_trace_append(
             trace.ConversationTraceEventType.AGENT_DETAIL,
             {"router_result": {
@@ -156,14 +179,28 @@ class OptimalAgentConversationEntity(
                 "action": router_result.action,
                 "entity": router_result.entity,
                 "params": router_result.params,
+                "routing_time_ms": round(route_time),
             }},
         )
 
         if router_result.is_tool_call:
             # Path A: Execute tool and respond with template
-            return await self._handle_tool_call(user_input, chat_log, router_result)
+            result = await self._handle_tool_call(user_input, chat_log, router_result)
+            total_time = (time.monotonic() - request_start) * 1000
+            LOGGER.info(
+                "[Complete] Path A (Tool) finished in %.0fms total",
+                total_time,
+            )
+            return result
+
         # Path B: Forward to Chat Model
-        return await self._handle_chat(user_input, chat_log)
+        result = await self._handle_chat(user_input, chat_log)
+        total_time = (time.monotonic() - request_start) * 1000
+        LOGGER.info(
+            "[Complete] Path B (Chat) finished in %.0fms total",
+            total_time,
+        )
+        return result
 
     async def _handle_tool_call(
         self,
@@ -183,8 +220,10 @@ class OptimalAgentConversationEntity(
             Conversation result with template-based response
 
         """
-        LOGGER.debug(
-            "Tool call: action=%s, entity=%s, params=%s",
+        import time
+
+        LOGGER.info(
+            "[Tool] Executing: %s on %s with params=%s",
             router_result.action,
             router_result.entity,
             router_result.params,
@@ -193,6 +232,7 @@ class OptimalAgentConversationEntity(
         # Get service call data
         service_data = self._router.get_service_call_data(router_result)
         if not service_data:
+            LOGGER.warning("[Tool] Invalid action format: %s", router_result.action)
             response_text = render_error(
                 "service_not_found",
                 action=router_result.action,
@@ -200,12 +240,14 @@ class OptimalAgentConversationEntity(
             return self._build_response(user_input, chat_log, response_text)
 
         domain, service, data = service_data
+        LOGGER.info("[Tool] Service call: %s.%s with data=%s", domain, service, data)
 
         # Check if entity exists
         entity_id = data.get("entity_id")
         if entity_id and not entity_id.endswith(".all"):
             state = self.hass.states.get(entity_id)
             if not state:
+                LOGGER.warning("[Tool] Entity not found: %s", entity_id)
                 response_text = render_error(
                     "entity_not_found",
                     entity_id=entity_id,
@@ -221,12 +263,14 @@ class OptimalAgentConversationEntity(
 
         # Execute the service
         try:
+            service_start = time.monotonic()
             await self.hass.services.async_call(
                 domain=domain,
                 service=service,
                 service_data=data,
                 blocking=True,
             )
+            service_time = (time.monotonic() - service_start) * 1000
 
             # Generate response using Jinja2 template
             response_text = render_response(
@@ -236,10 +280,14 @@ class OptimalAgentConversationEntity(
                 hass=self.hass,
             )
 
-            LOGGER.debug("Service executed successfully: %s", response_text)
+            LOGGER.info(
+                "[Tool] Service executed in %.0fms | Response: '%s'",
+                service_time,
+                response_text,
+            )
 
         except Exception as exc:  # noqa: BLE001
-            LOGGER.error("Service call failed: %s", exc)
+            LOGGER.error("[Tool] Service call FAILED: %s", exc)
             response_text = render_error(
                 "service_failed",
                 action=router_result.action,
@@ -253,8 +301,7 @@ class OptimalAgentConversationEntity(
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
-        """
-        Handle a conversation message using the Chat Model.
+        """Handle a conversation message using the Chat Model.
 
         Args:
             user_input: The user's input
@@ -264,7 +311,12 @@ class OptimalAgentConversationEntity(
             Conversation result with streamed response
 
         """
-        LOGGER.debug("Forwarding to chat model: %s", self._coordinator.chat_model)
+        import time
+
+        LOGGER.info(
+            "[Chat] Forwarding to chat model: %s",
+            self._coordinator.chat_model,
+        )
 
         if self._ollama_client is None:
             raise HomeAssistantError("Ollama client not initialized")
@@ -289,7 +341,16 @@ class OptimalAgentConversationEntity(
         # Add current user message
         messages.append(ollama.Message(role="user", content=user_input.text))
 
+        LOGGER.info(
+            "[Chat] Sending %d messages (system + %d history + user) to %s",
+            len(messages),
+            len(history),
+            self._coordinator.chat_model,
+        )
+
         try:
+            chat_start = time.monotonic()
+
             # Stream response from Chat Model
             response_generator = await self._ollama_client.chat(
                 model=self._coordinator.chat_model,
@@ -299,6 +360,7 @@ class OptimalAgentConversationEntity(
                 options={"num_ctx": CHAT_CONTEXT_LIMIT},
             )
 
+            first_token_time = None
             # Collect full response for history
             full_response = ""
 
@@ -307,8 +369,13 @@ class OptimalAgentConversationEntity(
                 self.entity_id,
                 self._collect_and_stream(response_generator),
             ):
+                if first_token_time is None:
+                    first_token_time = time.monotonic()
                 if hasattr(content, "content") and content.content:
                     full_response += content.content
+
+            chat_time = (time.monotonic() - chat_start) * 1000
+            ttft = ((first_token_time - chat_start) * 1000) if first_token_time else 0
 
             # Save to conversation history
             self._coordinator.add_conversation_message(
@@ -323,7 +390,13 @@ class OptimalAgentConversationEntity(
                     full_response,
                 )
 
-            LOGGER.debug("Chat response complete (%d chars)", len(full_response))
+            LOGGER.info(
+                "[Chat] Response complete: %d chars in %.0fms (TTFT: %.0fms) | Preview: '%s'",
+                len(full_response),
+                chat_time,
+                ttft,
+                full_response[:100].replace("\n", " ") + ("..." if len(full_response) > 100 else ""),
+            )
             return conversation.async_get_result_from_chat_log(user_input, chat_log)
 
         except ollama.RequestError as exc:

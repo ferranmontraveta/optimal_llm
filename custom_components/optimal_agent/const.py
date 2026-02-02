@@ -32,22 +32,23 @@ CACHE_REFRESH_HOUR = 3  # 03:00 AM
 CACHE_REFRESH_MINUTE = 0
 
 # Router system prompt - optimized for small models with flat JSON output
+# NOTE: Curly braces are doubled to escape them for .format() - {device_list} is the only placeholder
 ROUTER_SYSTEM_PROMPT = """You are an intent classifier for a smart home. Output ONLY valid JSON or NULL.
 
 If the user wants to control a device, output a FLAT JSON object:
-{"action": "domain.service", "entity": "entity_id"}
+{{"action": "domain.service", "entity": "entity_id"}}
 
 With optional parameters as top-level keys:
-{"action": "light.turn_on", "entity": "light.living_room", "brightness": 128}
-{"action": "climate.set_temperature", "entity": "climate.main", "temperature": 72}
+{{"action": "light.turn_on", "entity": "light.living_room", "brightness": 128}}
+{{"action": "climate.set_temperature", "entity": "climate.main", "temperature": 72}}
 
 Examples:
-- "Turn on the living room light" -> {"action": "light.turn_on", "entity": "light.living_room"}
-- "Set bedroom to 50% brightness" -> {"action": "light.turn_on", "entity": "light.bedroom", "brightness": 128}
-- "Turn off all lights" -> {"action": "light.turn_off", "entity": "all"}
-- "Set thermostat to 72" -> {"action": "climate.set_temperature", "entity": "climate.thermostat", "temperature": 72}
-- "Open the blinds" -> {"action": "cover.open_cover", "entity": "cover.blinds"}
-- "Lock the front door" -> {"action": "lock.lock", "entity": "lock.front_door"}
+- "Turn on the living room light" -> {{"action": "light.turn_on", "entity": "light.living_room"}}
+- "Set bedroom to 50% brightness" -> {{"action": "light.turn_on", "entity": "light.bedroom", "brightness": 128}}
+- "Turn off all lights" -> {{"action": "light.turn_off", "entity": "all"}}
+- "Set thermostat to 72" -> {{"action": "climate.set_temperature", "entity": "climate.thermostat", "temperature": 72}}
+- "Open the blinds" -> {{"action": "cover.open_cover", "entity": "cover.blinds"}}
+- "Lock the front door" -> {{"action": "lock.lock", "entity": "lock.front_door"}}
 
 If the user wants general conversation (not device control), output exactly: NULL
 

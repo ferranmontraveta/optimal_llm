@@ -105,11 +105,18 @@ class IntentRouter:
         self._ollama_url = ollama_url
         self._model = model
         self._keep_alive = keep_alive
-        self._ollama_client = ollama.AsyncClient(host=ollama_url)
+        # Lazy initialization to avoid blocking SSL call in event loop
+        self._ollama_client: ollama.AsyncClient | None = None
 
         # Context tracking for router (separate from chat model)
         self._context_messages: list[ollama.Message] = []
         self._system_prompt: str = ""
+
+    def _get_client(self) -> ollama.AsyncClient:
+        """Get or create the Ollama client (lazy initialization)."""
+        if self._ollama_client is None:
+            self._ollama_client = ollama.AsyncClient(host=self._ollama_url)
+        return self._ollama_client
 
     @property
     def model(self) -> str:
@@ -144,7 +151,7 @@ class IntentRouter:
                 ollama.Message(role="user", content="Hello"),
             ]
 
-            await self._ollama_client.chat(
+            await self._get_client().chat(
                 model=self._model,
                 messages=messages,
                 keep_alive=self._keep_alive,
@@ -168,8 +175,10 @@ class IntentRouter:
             RouterResult indicating whether to execute a tool or use chat model
 
         """
+        import time
+
         if not self._system_prompt:
-            LOGGER.warning("Router not initialized, defaulting to chat")
+            LOGGER.warning("[Router] Not initialized, defaulting to chat")
             return RouterResult(is_tool_call=False)
 
         try:
@@ -178,20 +187,33 @@ class IntentRouter:
                 ollama.Message(role="user", content=message),
             ]
 
-            response = await self._ollama_client.chat(
+            start_time = time.monotonic()
+            response = await self._get_client().chat(
                 model=self._model,
                 messages=messages,
                 keep_alive=self._keep_alive,
                 options={"num_ctx": ROUTER_CONTEXT_LIMIT},
             )
+            elapsed_ms = (time.monotonic() - start_time) * 1000
 
             response_text = response.get("message", {}).get("content", "")
-            LOGGER.debug("Router response: %s", response_text[:200])
+
+            # Log router metrics
+            prompt_tokens = response.get("prompt_eval_count", 0)
+            eval_tokens = response.get("eval_count", 0)
+
+            LOGGER.debug(
+                "[Router] Model response in %.0fms (prompt: %d tokens, eval: %d tokens): %s",
+                elapsed_ms,
+                prompt_tokens,
+                eval_tokens,
+                response_text[:150].replace("\n", " "),
+            )
 
             return parse_router_response(response_text)
 
         except (ollama.RequestError, ollama.ResponseError) as exc:
-            LOGGER.error("Router request failed: %s", exc)
+            LOGGER.error("[Router] Request FAILED: %s", exc)
             # Fall back to chat model on error
             return RouterResult(is_tool_call=False)
 
