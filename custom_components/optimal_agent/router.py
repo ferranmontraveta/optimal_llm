@@ -33,7 +33,7 @@ SMART_HOME_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "entity_id": {
                         "type": "string",
-                        "description": "The light entity ID (e.g., light.living_room, light.bedroom). Use 'all' for all lights.",
+                        "description": "The light entity ID from the available devices list (e.g., light.living_room). Use 'all' to target all lights.",
                     },
                     "brightness": {
                         "type": "integer",
@@ -54,7 +54,7 @@ SMART_HOME_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "entity_id": {
                         "type": "string",
-                        "description": "The light entity ID (e.g., light.living_room). Use 'all' for all lights.",
+                        "description": "The light entity ID from the available devices list (e.g., light.living_room). Use 'all' to target all lights.",
                     },
                 },
                 "required": ["entity_id"],
@@ -324,12 +324,16 @@ def parse_tool_calls(response: ollama.ChatResponse) -> RouterResult:
     # Extract entity_id from arguments
     entity_id = arguments.pop("entity_id", None)
 
-    # Handle "all" entity
-    if entity_id and entity_id.lower() == "all":
-        entity_id = f"{domain}.all"
-    elif entity_id and not entity_id.startswith(f"{domain}."):
-        # If entity doesn't have domain prefix, add it
-        entity_id = f"{domain}.{entity_id}"
+    # Handle entity_id normalization
+    # "all" is kept as-is (special marker for targeting all entities)
+    # Otherwise, ensure entity has the correct domain prefix
+    if entity_id and entity_id.lower() != "all":
+        if not entity_id.startswith(f"{domain}."):
+            # If entity doesn't have domain prefix, add it
+            entity_id = f"{domain}.{entity_id}"
+    # Keep "all" as lowercase for consistent handling
+    elif entity_id:
+        entity_id = "all"
 
     return RouterResult(
         is_tool_call=True,
@@ -523,8 +527,10 @@ class IntentRouter:
 
         if result.entity:
             # Handle "all" entity for domain-wide operations
+            # In Home Assistant, omitting entity_id targets ALL entities of that domain
             if result.entity.lower() == "all":
-                service_data["entity_id"] = f"{domain}.all"
+                # Don't include entity_id - HA will target all entities in the domain
+                LOGGER.info("[Tool] Targeting all %s entities (no entity_id)", domain)
             else:
                 service_data["entity_id"] = result.entity
 

@@ -273,9 +273,10 @@ class OptimalAgentConversationEntity(
             service_time = (time.monotonic() - service_start) * 1000
 
             # Generate response using Jinja2 template
+            # Use router_result.entity (may be "all") rather than service_data entity_id
             response_text = render_response(
                 action=router_result.action,
-                entity_id=entity_id,
+                entity_id=router_result.entity,
                 params=router_result.params,
                 hass=self.hass,
             )

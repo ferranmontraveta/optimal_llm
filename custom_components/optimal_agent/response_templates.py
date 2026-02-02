@@ -88,7 +88,7 @@ def render_response(
 
     Args:
         action: The action from router (e.g., "light.turn_on")
-        entity_id: Target entity ID (can be None for scenes/scripts)
+        entity_id: Target entity ID (can be None for scenes/scripts, or "all" for all entities)
         params: Additional parameters from router (brightness, temperature, etc.)
         hass: Home Assistant instance for state lookup
 
@@ -100,11 +100,19 @@ def render_response(
     template = Template(template_str)
 
     # Get entity's friendly name from state
-    friendly_name = entity_id or "Device"
-    if entity_id:
+    # Handle "all" as a special case for domain-wide operations
+    if entity_id and entity_id.lower() == "all":
+        # Extract domain from action (e.g., "light.turn_on" -> "light")
+        domain = action.split(".")[0] if "." in action else "device"
+        friendly_name = f"All {domain}s"
+    elif entity_id:
         state = hass.states.get(entity_id)
         if state:
             friendly_name = state.attributes.get("friendly_name", entity_id)
+        else:
+            friendly_name = entity_id
+    else:
+        friendly_name = "Device"
 
     # Build template context
     context = {
