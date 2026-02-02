@@ -1,8 +1,10 @@
-"""Intent Router for optimal_agent - Routes user messages to tools or chat model."""
+"""Intent Router for optimal_agent - Routes user messages to tools or chat model.
+
+Uses Ollama's native tool calling API with FunctionGemma or similar models.
+"""
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +14,266 @@ from .const import LOGGER, ROUTER_CONTEXT_LIMIT, ROUTER_SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
+
+
+# ============================================================================
+# Tool Definitions for Ollama Native Tool Calling
+# ============================================================================
+# These are passed to ollama.chat(tools=[...]) and the model returns
+# tool_calls with function name and arguments.
+
+SMART_HOME_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "light_turn_on",
+            "description": "Turn on a light or set its brightness",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The light entity ID (e.g., light.living_room, light.bedroom). Use 'all' for all lights.",
+                    },
+                    "brightness": {
+                        "type": "integer",
+                        "description": "Brightness level from 0-255. 128 = 50%, 255 = 100%",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "light_turn_off",
+            "description": "Turn off a light",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The light entity ID (e.g., light.living_room). Use 'all' for all lights.",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_turn_on",
+            "description": "Turn on a switch",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The switch entity ID (e.g., switch.coffee_maker)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_turn_off",
+            "description": "Turn off a switch",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The switch entity ID (e.g., switch.coffee_maker)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "climate_set_temperature",
+            "description": "Set the temperature on a thermostat or climate device",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The climate entity ID (e.g., climate.thermostat)",
+                    },
+                    "temperature": {
+                        "type": "number",
+                        "description": "Target temperature in the system's unit (Fahrenheit or Celsius)",
+                    },
+                },
+                "required": ["entity_id", "temperature"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cover_open",
+            "description": "Open a cover, blind, or garage door",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The cover entity ID (e.g., cover.blinds, cover.garage_door)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cover_close",
+            "description": "Close a cover, blind, or garage door",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The cover entity ID (e.g., cover.blinds, cover.garage_door)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fan_turn_on",
+            "description": "Turn on a fan",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The fan entity ID (e.g., fan.bedroom)",
+                    },
+                    "percentage": {
+                        "type": "integer",
+                        "description": "Fan speed percentage from 0-100",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fan_turn_off",
+            "description": "Turn off a fan",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The fan entity ID (e.g., fan.bedroom)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lock_lock",
+            "description": "Lock a door lock",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The lock entity ID (e.g., lock.front_door)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lock_unlock",
+            "description": "Unlock a door lock",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The lock entity ID (e.g., lock.front_door)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scene_activate",
+            "description": "Activate a scene",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The scene entity ID (e.g., scene.movie_time)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "script_run",
+            "description": "Run a script",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The script entity ID (e.g., script.good_morning)",
+                    },
+                },
+                "required": ["entity_id"],
+            },
+        },
+    },
+]
+
+# Mapping from tool function names to Home Assistant service calls
+TOOL_TO_SERVICE: dict[str, tuple[str, str]] = {
+    "light_turn_on": ("light", "turn_on"),
+    "light_turn_off": ("light", "turn_off"),
+    "switch_turn_on": ("switch", "turn_on"),
+    "switch_turn_off": ("switch", "turn_off"),
+    "climate_set_temperature": ("climate", "set_temperature"),
+    "cover_open": ("cover", "open_cover"),
+    "cover_close": ("cover", "close_cover"),
+    "fan_turn_on": ("fan", "turn_on"),
+    "fan_turn_off": ("fan", "turn_off"),
+    "lock_lock": ("lock", "lock"),
+    "lock_unlock": ("lock", "unlock"),
+    "scene_activate": ("scene", "turn_on"),
+    "script_run": ("script", "turn_on"),
+}
 
 
 @dataclass
@@ -25,64 +287,61 @@ class RouterResult:
     raw_response: str = ""  # Original model output for debugging
 
 
-def parse_router_response(response: str) -> RouterResult:
+def parse_tool_calls(response: ollama.ChatResponse) -> RouterResult:
     """
-    Parse flat JSON from router model response.
-
-    Expected formats:
-    - Tool call: {"action": "light.turn_on", "entity": "light.living_room", "brightness": 128}
-    - No tool: NULL
+    Parse tool calls from Ollama's native tool calling response.
 
     Args:
-        response: Raw text response from the router model
+        response: The ChatResponse from Ollama with potential tool_calls
 
     Returns:
-        RouterResult with parsed data or is_tool_call=False for conversation
+        RouterResult with parsed tool call or is_tool_call=False for conversation
 
     """
-    text = response.strip()
+    message = response.get("message", {})
+    tool_calls = message.get("tool_calls")
 
-    # Check for NULL response (conversation mode)
-    if text.upper() == "NULL" or not text:
-        return RouterResult(is_tool_call=False, raw_response=text)
+    # No tool calls means conversation mode
+    if not tool_calls:
+        content = message.get("content", "")
+        return RouterResult(is_tool_call=False, raw_response=content)
 
-    # Try to extract JSON from response (model might add extra text)
-    json_start = text.find("{")
-    json_end = text.rfind("}") + 1
+    # Take the first tool call (most relevant)
+    tool_call = tool_calls[0]
+    function_info = tool_call.get("function", {})
+    function_name = function_info.get("name", "")
+    arguments = function_info.get("arguments", {})
 
-    if json_start == -1 or json_end == 0:
-        LOGGER.debug("No JSON found in router response: %s", text[:100])
-        return RouterResult(is_tool_call=False, raw_response=text)
+    # Map tool function name to Home Assistant service
+    service_mapping = TOOL_TO_SERVICE.get(function_name)
+    if not service_mapping:
+        LOGGER.warning("Unknown tool function: %s", function_name)
+        return RouterResult(is_tool_call=False, raw_response=str(tool_call))
 
-    json_str = text[json_start:json_end]
+    domain, service = service_mapping
+    action = f"{domain}.{service}"
 
-    try:
-        data = json.loads(json_str)
+    # Extract entity_id from arguments
+    entity_id = arguments.pop("entity_id", None)
 
-        # Extract required fields
-        action = data.pop("action", None)
-        entity = data.pop("entity", None)
+    # Handle "all" entity
+    if entity_id and entity_id.lower() == "all":
+        entity_id = f"{domain}.all"
+    elif entity_id and not entity_id.startswith(f"{domain}."):
+        # If entity doesn't have domain prefix, add it
+        entity_id = f"{domain}.{entity_id}"
 
-        if not action:
-            LOGGER.debug("No action in router JSON: %s", json_str)
-            return RouterResult(is_tool_call=False, raw_response=text)
-
-        # Remaining keys are service parameters (brightness, temperature, etc.)
-        return RouterResult(
-            is_tool_call=True,
-            action=action,
-            entity=entity,
-            params=data,
-            raw_response=text,
-        )
-
-    except json.JSONDecodeError as exc:
-        LOGGER.debug("Failed to parse router JSON: %s - %s", json_str[:100], exc)
-        return RouterResult(is_tool_call=False, raw_response=text)
+    return RouterResult(
+        is_tool_call=True,
+        action=action,
+        entity=entity_id,
+        params=arguments,  # Remaining args are service params (brightness, temperature, etc.)
+        raw_response=str(tool_call),
+    )
 
 
 class IntentRouter:
-    """Routes user intents to tools or chat model using a small classifier model."""
+    """Routes user intents to tools or chat model using Ollama's native tool calling."""
 
     def __init__(
         self,
@@ -97,7 +356,7 @@ class IntentRouter:
         Args:
             hass: Home Assistant instance
             ollama_url: URL of the Ollama server
-            model: Name of the router model (e.g., gemma3:1b)
+            model: Name of the router model (e.g., functiongemma:latest)
             keep_alive: How long to keep model loaded (-1 for indefinite)
 
         """
@@ -108,9 +367,9 @@ class IntentRouter:
         # Lazy initialization to avoid blocking SSL call in event loop
         self._ollama_client: ollama.AsyncClient | None = None
 
-        # Context tracking for router (separate from chat model)
-        self._context_messages: list[ollama.Message] = []
+        # System prompt for tool-calling context
         self._system_prompt: str = ""
+        self._device_list: str = ""
 
     def _get_client(self) -> ollama.AsyncClient:
         """Get or create the Ollama client (lazy initialization)."""
@@ -131,10 +390,12 @@ class IntentRouter:
             device_list: Formatted list of available devices
 
         """
+        self._device_list = device_list
         self._system_prompt = ROUTER_SYSTEM_PROMPT.format(device_list=device_list)
         LOGGER.debug(
-            "Router initialized with %d char system prompt",
+            "Router initialized with %d char system prompt, %d tools",
             len(self._system_prompt),
+            len(SMART_HOME_TOOLS),
         )
 
     async def async_warm_model(self) -> None:
@@ -154,6 +415,7 @@ class IntentRouter:
             await self._get_client().chat(
                 model=self._model,
                 messages=messages,
+                tools=SMART_HOME_TOOLS,
                 keep_alive=self._keep_alive,
                 options={"num_ctx": ROUTER_CONTEXT_LIMIT},
             )
@@ -167,6 +429,9 @@ class IntentRouter:
     async def async_route(self, message: str) -> RouterResult:
         """
         Route a user message to determine if it's a tool call or conversation.
+
+        Uses Ollama's native tool calling - if the model returns tool_calls,
+        we execute them. If it returns plain text, we forward to chat model.
 
         Args:
             message: The user's message text
@@ -191,26 +456,39 @@ class IntentRouter:
             response = await self._get_client().chat(
                 model=self._model,
                 messages=messages,
+                tools=SMART_HOME_TOOLS,
                 keep_alive=self._keep_alive,
                 options={"num_ctx": ROUTER_CONTEXT_LIMIT},
             )
             elapsed_ms = (time.monotonic() - start_time) * 1000
 
-            response_text = response.get("message", {}).get("content", "")
-
             # Log router metrics
             prompt_tokens = response.get("prompt_eval_count", 0)
             eval_tokens = response.get("eval_count", 0)
 
-            LOGGER.debug(
-                "[Router] Model response in %.0fms (prompt: %d tokens, eval: %d tokens): %s",
-                elapsed_ms,
-                prompt_tokens,
-                eval_tokens,
-                response_text[:150].replace("\n", " "),
-            )
+            # Check for tool calls in the response
+            message_obj = response.get("message", {})
+            tool_calls = message_obj.get("tool_calls")
+            content = message_obj.get("content", "")
 
-            return parse_router_response(response_text)
+            if tool_calls:
+                LOGGER.debug(
+                    "[Router] Tool call detected in %.0fms (prompt: %d tokens, eval: %d tokens): %s",
+                    elapsed_ms,
+                    prompt_tokens,
+                    eval_tokens,
+                    str(tool_calls)[:150],
+                )
+            else:
+                LOGGER.debug(
+                    "[Router] No tool call in %.0fms (prompt: %d tokens, eval: %d tokens): %s",
+                    elapsed_ms,
+                    prompt_tokens,
+                    eval_tokens,
+                    content[:150].replace("\n", " ") if content else "(empty)",
+                )
+
+            return parse_tool_calls(response)
 
         except (ollama.RequestError, ollama.ResponseError) as exc:
             LOGGER.error("[Router] Request FAILED: %s", exc)

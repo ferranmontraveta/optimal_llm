@@ -20,8 +20,9 @@ DEFAULT_CHAT_MODEL = "gemma3:4b"
 DEFAULT_TIMEOUT = 120  # seconds - models can be slow on low-powered hardware
 
 # Context token limits for memory management
-ROUTER_CONTEXT_LIMIT = 1024  # tokens - keep router context small for speed
-CHAT_CONTEXT_LIMIT = 4096  # tokens - allow longer conversations
+# Note: Router needs more context now due to tool definitions (~1500-2000 tokens)
+ROUTER_CONTEXT_LIMIT = 4096  # tokens - includes tool schemas + device list
+CHAT_CONTEXT_LIMIT = 8192  # tokens - allow longer conversations
 
 # Storage
 STORAGE_KEY = "optimal_agent_state"
@@ -31,31 +32,16 @@ STORAGE_VERSION = 1
 CACHE_REFRESH_HOUR = 3  # 03:00 AM
 CACHE_REFRESH_MINUTE = 0
 
-# Router system prompt - optimized for small models with flat JSON output
-# NOTE: Curly braces are doubled to escape them for .format() - {device_list} is the only placeholder
-ROUTER_SYSTEM_PROMPT = """You are an intent classifier for a smart home. Output ONLY valid JSON or NULL.
+# Router system prompt - optimized for native tool calling models like FunctionGemma
+# The model uses Ollama's tools parameter, so this prompt provides context only.
+# NOTE: {device_list} is the only placeholder
+ROUTER_SYSTEM_PROMPT = """You are a smart home assistant that controls devices. You have access to tools for controlling lights, switches, climate, covers, fans, locks, scenes, and scripts.
 
-If the user wants to control a device, output a FLAT JSON object:
-{{"action": "domain.service", "entity": "entity_id"}}
+When the user asks to control a device, use the appropriate tool with the correct entity_id from the available devices list.
 
-With optional parameters as top-level keys:
-{{"action": "light.turn_on", "entity": "light.living_room", "brightness": 128}}
-{{"action": "climate.set_temperature", "entity": "climate.main", "temperature": 72}}
+For general conversation, greetings, or questions that don't involve device control, respond naturally without using any tools.
 
-Examples:
-- "Turn on the living room light" -> {{"action": "light.turn_on", "entity": "light.living_room"}}
-- "Set bedroom to 50% brightness" -> {{"action": "light.turn_on", "entity": "light.bedroom", "brightness": 128}}
-- "Turn off all lights" -> {{"action": "light.turn_off", "entity": "all"}}
-- "Set thermostat to 72" -> {{"action": "climate.set_temperature", "entity": "climate.thermostat", "temperature": 72}}
-- "Open the blinds" -> {{"action": "cover.open_cover", "entity": "cover.blinds"}}
-- "Lock the front door" -> {{"action": "lock.lock", "entity": "lock.front_door"}}
-
-If the user wants general conversation (not device control), output exactly: NULL
-
-Valid actions: light.turn_on, light.turn_off, switch.turn_on, switch.turn_off,
-climate.set_temperature, cover.open_cover, cover.close_cover, fan.turn_on,
-fan.turn_off, lock.lock, lock.unlock, scene.turn_on, script.turn_on
-
-Available devices:
+Available devices in this home:
 {device_list}
-"""
+
+Match user requests to the closest entity_id from the list above. If the user says a room name or device name, find the matching entity."""
