@@ -464,8 +464,12 @@ Be concise, helpful, and friendly. If you're not sure about something, ask for c
             )
         )
 
+        # Create intent response with speech set (required for frontend)
+        intent_response = intent.IntentResponse(language=user_input.language)
+        intent_response.async_set_speech(response_text)
+
         return conversation.ConversationResult(
-            response=intent.IntentResponse(language=user_input.language),
+            response=intent_response,
             conversation_id=user_input.conversation_id,
         )
 
